@@ -1,0 +1,6 @@
+{
+  "name": "Contabilidad Pro",
+  "description": "Sistema avanzado de conciliación contable, gestión de clientes, anticipos, facturas y reportes con simulación FIFO asistida por Inteligencia Artificial.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
