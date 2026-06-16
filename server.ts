@@ -46,10 +46,9 @@ async function initializeDatabase() {
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       email TEXT UNIQUE NOT NULL,
       name TEXT NOT NULL,
-      role TEXT,
       role TEXT NOT NULL,
       permissions TEXT NOT NULL,
-      password TEXT NOT NULL
+      password TEXT NOT NULL DEFAULT ''
     )
   `);
 
@@ -185,8 +184,8 @@ async function initializeDatabase() {
 
     for (const u of usersSeed) {
       await db.execute({
-        sql: 'INSERT INTO users (email, name, role, permissions) VALUES (?, ?, ?, ?)',
-        args: [u.email, u.name, u.role, u.permissions]
+        sql: 'INSERT INTO users (email, name, role, permissions, password) VALUES (?, ?, ?, ?, ?)',
+        args: [u.email, u.name, u.role, u.permissions, 'admin']
       });
     }
 
@@ -287,20 +286,22 @@ app.post('/api/auth/login', async (req, res) => {
       sql: 'SELECT * FROM users WHERE email = ?',
       args: [email]
     });
-    if (userRes.rows.length > 0) {
-      const row = userRes.rows[0];
-      res.json({
-        success: true,
-        user: {
-          email: row.email,
-          name: row.name,
-          role: row.role,
-          permissions: JSON.parse(row.permissions as string)
-        }
-      });
-    } else {
-      res.status(401).json({ success: false, error: 'Credenciales inválidas.' });
+    if (userRes.rows.length === 0) {
+      return res.status(401).json({ success: false, error: 'Credenciales inválidas.' });
     }
+    const row = userRes.rows[0];
+    if (row.password !== password) {
+      return res.status(401).json({ success: false, error: 'Credenciales inválidas.' });
+    }
+    res.json({
+      success: true,
+      user: {
+        email: row.email,
+        name: row.name,
+        role: row.role,
+        permissions: JSON.parse(row.permissions as string)
+      }
+    });
   } catch (err: any) {
     console.error(err);
     res.status(500).json({ error: err.message });
@@ -883,55 +884,54 @@ app.post('/api/transactions/applications/:id/resubmit', async (req, res) => {
     const numRate = parseFloat(rateBCV);
     const numBSS = numAmount * numRate;
 
-    await db.transaction(async (tx) => {
-      const invRes = await tx.execute({ sql: 'SELECT * FROM invoices WHERE id = ?', args: [appRecord.invoice_id] });
-      const advRes = await tx.execute({ sql: 'SELECT * FROM advances WHERE id = ?', args: [appRecord.advance_id] });
+    const invRes = await db.execute({ sql: 'SELECT * FROM invoices WHERE id = ?', args: [appRecord.invoice_id] });
+    const advRes = await db.execute({ sql: 'SELECT * FROM advances WHERE id = ?', args: [appRecord.advance_id] });
 
-      if (invRes.rows.length > 0 && advRes.rows.length > 0) {
-        const invoice = invRes.rows[0];
-        const advance = advRes.rows[0];
+    if (invRes.rows.length > 0 && advRes.rows.length > 0) {
+      const invoice = invRes.rows[0];
+      const advance = advRes.rows[0];
 
-        const oldApplied = Number(appRecord.amount_applied);
-        const tempInvoiceRemaining = Number(invoice.remaining_amount) + oldApplied;
-        const tempAdvanceRemaining = Number(advance.remaining_amount) + oldApplied;
+      const oldApplied = Number(appRecord.amount_applied);
+      const tempInvoiceRemaining = Number(invoice.remaining_amount) + oldApplied;
+      const tempAdvanceRemaining = Number(advance.remaining_amount) + oldApplied;
 
-        const newInvoiceRemaining = Math.max(0, tempInvoiceRemaining - numAmount);
-        const invStatus = newInvoiceRemaining <= 0 ? 'PAGADO' : 'PENDIENTE';
-        await tx.execute({
-          sql: 'UPDATE invoices SET remaining_amount = ?, status = ? WHERE id = ?',
-          args: [newInvoiceRemaining, invStatus, appRecord.invoice_id]
-        });
-
-        const newAdvanceRemaining = Math.max(0, tempAdvanceRemaining - numAmount);
-        const advStatus = newAdvanceRemaining <= 0 ? 'APLICADO' : 'DISPONIBLE';
-        await tx.execute({
-          sql: 'UPDATE advances SET remaining_amount = ?, status = ? WHERE id = ?',
-          args: [newAdvanceRemaining, advStatus, appRecord.advance_id]
-        });
-
-        const cliRes = await tx.execute({ sql: 'SELECT * FROM clients WHERE id = ?', args: [advance.client_id] });
-        if (cliRes.rows.length > 0) {
-          const client = cliRes.rows[0];
-          const tempPending = Number(client.saldo_pendiente) + oldApplied;
-          const newPending = Math.max(0, tempPending - numAmount);
-          const cliStatus = newPending === 0 ? 'Al Corriente' : 'En Revisión';
-          await tx.execute({
-            sql: 'UPDATE clients SET saldo_pendiente = ?, estado_saldo = ? WHERE id = ?',
-            args: [newPending, cliStatus, advance.client_id]
-          });
-        }
-      }
-
+      const newInvoiceRemaining = Math.max(0, tempInvoiceRemaining - numAmount);
+      const invStatus = newInvoiceRemaining <= 0 ? 'PAGADO' : 'PENDIENTE';
       await tx.execute({
-        sql: "UPDATE applications SET amount_applied = ?, amount_applied_bss = ?, rate_bcv = ?, status = 'PENDIENTE_AUDITORIA', audit_notes = 'Reenviado con ajustes' WHERE id = ?",
-        args: [numAmount, numBSS, numRate, id]
+        sql: 'UPDATE invoices SET remaining_amount = ?, status = ? WHERE id = ?',
+        args: [newInvoiceRemaining, invStatus, appRecord.invoice_id]
       });
-    });
 
-    res.json({ success: true });
+      const newAdvanceRemaining = Math.max(0, tempAdvanceRemaining - numAmount);
+      const advStatus = newAdvanceRemaining <= 0 ? 'APLICADO' : 'DISPONIBLE';
+      await tx.execute({
+        sql: 'UPDATE advances SET remaining_amount = ?, status = ? WHERE id = ?',
+        args: [newAdvanceRemaining, advStatus, appRecord.advance_id]
+      });
+
+      const cliRes = await tx.execute({ sql: 'SELECT * FROM clients WHERE id = ?', args: [advance.client_id] });
+      if (cliRes.rows.length > 0) {
+        const client = cliRes.rows[0];
+        const tempPending = Number(client.saldo_pendiente) + oldApplied;
+        const newPending = Math.max(0, tempPending - numAmount);
+        const cliStatus = newPending === 0 ? 'Al Corriente' : 'En Revisión';
+        await tx.execute({
+          sql: 'UPDATE clients SET saldo_pendiente = ?, estado_saldo = ? WHERE id = ?',
+          args: [newPending, cliStatus, advance.client_id]
+        });
+      }
+    }
+
+    await tx.execute({
+      sql: "UPDATE applications SET amount_applied = ?, amount_applied_bss = ?, rate_bcv = ?, status = 'PENDIENTE_AUDITORIA', audit_notes = 'Reenviado con ajustes' WHERE id = ?",
+      args: [numAmount, numBSS, numRate, id]
+    });
+  });
+
+res.json({ success: true });
   } catch (err: any) {
-    res.status(550).json({ error: err.message });
-  }
+  res.status(550).json({ error: err.message });
+}
 });
 
 // Caja Endpoints
