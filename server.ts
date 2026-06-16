@@ -249,11 +249,11 @@ async function initializeDatabase() {
   const adminCheck = await db.execute({
     sql: 'SELECT email FROM users WHERE email = ?',
     args: ['admin@corporativo.com']
-  });
+  }
   if (adminCheck.rows.length === 0) {
     await db.execute({
-      sql: 'INSERT INTO users (email, name, role, permissions) VALUES (?, ?, ?, ?)',
-      args: ['admin@corporativo.com', 'Administrador Demo', 'Administrador', JSON.stringify(['canRegisterClients', 'canRegisterAdvances', 'canVerifyAdvances', 'canApplyAdvances', 'canAuditApplications', 'canManageCaja', 'canAuditCaja', 'canManageUsers'])]
+      sql: 'INSERT INTO users (email, name, role, permissions, password) VALUES (?, ?, ?, ?, ?)',
+      args: ['admin@corporativo.com', 'Administrador Demo', 'Administrador', JSON.stringify(['canRegisterClients', 'canRegisterAdvances', 'canVerifyAdvances', 'canApplyAdvances', 'canAuditApplications', 'canManageCaja', 'canAuditCaja', 'canManageUsers']), 'admin']
     });
     console.log('Usuario administrador creado por defecto.');
   }
@@ -339,8 +339,8 @@ app.post('/api/auth/register-user', async (req, res) => {
     }
     const perms = permissions || [];
     await db.execute({
-      sql: 'INSERT INTO users (email, name, role, permissions) VALUES (?, ?, ?, ?)',
-      args: [email, name, role, JSON.stringify(perms)]
+      sql: 'INSERT INTO users (email, name, role, permissions, password) VALUES (?, ?, ?, ?, ?)',
+      args: [email, name, role, JSON.stringify(perms), 'admin']
     });
     res.status(201).json({ email, name, role, permissions: perms });
   } catch (err: any) {
@@ -1108,40 +1108,46 @@ app.post('/api/caja/session/close', async (req, res) => {
     const discrepancy = parsedReal - totalBSS;
     const closedAt = new Date().toISOString();
 
-    await db.transaction(async (tx) => {
+    const tx = await db.transaction('write');
+    try {
       await tx.execute({
         sql: "UPDATE caja_sessions SET status = 'CERRADA', closed_at = ? WHERE id = ?",
         args: [closedAt, session.id]
       });
+      await tx.commit();
+    } catch (err) {
+      await tx.rollback();
+      throw err;
+    }
 
-      await tx.execute({
-        sql: 'INSERT INTO caja_closures (session_id, calculated_balance_bss, real_balance_bss, discrepancy_bss, closure_date, notes) VALUES (?, ?, ?, ?, ?, ?)',
-        args: [session.id, totalBSS, parsedReal, discrepancy, closedAt, notes || '']
-      });
+    await tx.execute({
+      sql: 'INSERT INTO caja_closures (session_id, calculated_balance_bss, real_balance_bss, discrepancy_bss, closure_date, notes) VALUES (?, ?, ?, ?, ?, ?)',
+      args: [session.id, totalBSS, parsedReal, discrepancy, closedAt, notes || '']
     });
+  });
 
-    res.json({
-      success: true,
-      session: {
-        id: Number(session.id),
-        openedBy: session.opened_by as string,
-        openedAt: session.opened_at as string,
-        closedAt,
-        initialBalance: Number(session.initial_balance),
-        status: 'CERRADA'
-      },
-      closure: {
-        sessionId: Number(session.id),
-        calculatedBalanceBSS: totalBSS,
-        realBalanceBSS: parsedReal,
-        discrepancyBSS: discrepancy,
-        closureDate: closedAt,
-        notes: notes || ''
-      }
-    });
-  } catch (err: any) {
-    res.status(500).json({ error: err.message });
+res.json({
+  success: true,
+  session: {
+    id: Number(session.id),
+    openedBy: session.opened_by as string,
+    openedAt: session.opened_at as string,
+    closedAt,
+    initialBalance: Number(session.initial_balance),
+    status: 'CERRADA'
+  },
+  closure: {
+    sessionId: Number(session.id),
+    calculatedBalanceBSS: totalBSS,
+    realBalanceBSS: parsedReal,
+    discrepancyBSS: discrepancy,
+    closureDate: closedAt,
+    notes: notes || ''
   }
+});
+  } catch (err: any) {
+  res.status(500).json({ error: err.message });
+}
 });
 
 // Execute FIFO reconciliation for a selected client
