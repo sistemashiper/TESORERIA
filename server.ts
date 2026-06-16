@@ -245,11 +245,11 @@ async function initializeDatabase() {
   }
 }
 
-async function startServer() {
-  await initializeDatabase();
+// Initialize Turso database asynchronously in the background
+initializeDatabase().catch(console.error);
 
-  const app = express();
-  const PORT = parseInt(process.env.PORT || '3000', 10);
+export const app = express();
+const PORT = parseInt(process.env.PORT || '3000', 10);
 
   app.use(express.json());
 
@@ -1315,24 +1315,31 @@ Por favor, formatea tu respuesta en un elegante Markdown listo para mostrar en u
   });
 
   // Vite development middleware or production static deployment
-  if (process.env.NODE_ENV !== 'production') {
-    const vite = await createViteServer({
-      server: { middlewareMode: true },
-      appType: 'spa',
-    });
-    app.use(vite.middlewares);
-  } else {
-    const distPath = path.join(process.cwd(), 'dist');
-    app.use(express.static(distPath));
-    app.get('*', (req, res) => {
-      res.sendFile(path.join(distPath, 'index.html'));
-    });
+  if (!process.env.VERCEL) {
+    if (process.env.NODE_ENV !== 'production') {
+      (async () => {
+        const vite = await createViteServer({
+          server: { middlewareMode: true },
+          appType: 'spa',
+        });
+        app.use(vite.middlewares);
+        
+        app.listen(PORT, '0.0.0.0', () => {
+          console.log(`Server environment: ${process.env.NODE_ENV || 'development'}`);
+          console.log(`Server running on http://localhost:${PORT}`);
+        });
+      })();
+    } else {
+      const distPath = path.join(process.cwd(), 'dist');
+      app.use(express.static(distPath));
+      app.get('*', (req, res) => {
+        res.sendFile(path.join(distPath, 'index.html'));
+      });
+      app.listen(PORT, '0.0.0.0', () => {
+        console.log(`Server environment: production`);
+        console.log(`Server running on http://localhost:${PORT}`);
+      });
+    }
   }
 
-  app.listen(PORT, '0.0.0.0', () => {
-    console.log(`Server environment: ${process.env.NODE_ENV || 'development'}`);
-    console.log(`Server running on http://localhost:${PORT}`);
-  });
-}
-
-startServer();
+export default app;
