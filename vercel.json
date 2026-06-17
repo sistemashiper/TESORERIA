@@ -10,7 +10,15 @@
         },
         {
             "src": "server.ts",
-            "use": "@vercel/node"
+            "use": "@vercel/node",
+            "runtime": "nodejs18.x",
+            "config": {
+                "includeFiles": [
+                    "src/**",
+                    "package.json",
+                    "tsconfig.json"
+                ]
+            }
         }
     ],
     "routes": [
