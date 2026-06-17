@@ -253,7 +253,22 @@ async function initializeDatabase() {
   if (adminCheck.rows.length === 0) {
     await db.execute({
       sql: 'INSERT INTO users (email, name, role, permissions, password) VALUES (?, ?, ?, ?, ?)',
-      args: ['admin@corporativo.com', 'Administrador Demo', 'Administrador', JSON.stringify(['canRegisterClients', 'canRegisterAdvances', 'canVerifyAdvances', 'canApplyAdvances', 'canAuditApplications', 'canManageCaja', 'canAuditCaja', 'canManageUsers']), 'admin']
+      args: [
+        'admin@corporativo.com',
+        'Administrador Demo',
+        'Administrador',
+        JSON.stringify([
+          'canRegisterClients',
+          'canRegisterAdvances',
+          'canVerifyAdvances',
+          'canApplyAdvances',
+          'canAuditApplications',
+          'canManageCaja',
+          'canAuditCaja',
+          'canManageUsers'
+        ]),
+        'admin'
+      ]
     });
     console.log('Usuario administrador creado por defecto.');
   }
@@ -1080,15 +1095,17 @@ app.post('/api/caja/transaction', async (req, res) => {
 app.post('/api/caja/session/close', async (req, res) => {
   try {
     const { sessionId, realBalanceBSS, notes } = req.body;
+
     const sessionRes = await db.execute({
       sql: "SELECT * FROM caja_sessions WHERE id = ? AND status = 'ABIERTA'",
       args: [parseInt(sessionId)]
     });
+
     if (sessionRes.rows.length === 0) {
       return res.status(400).json({ error: 'No hay sesión activa.' });
     }
-    const session = sessionRes.rows[0];
 
+    const session = sessionRes.rows[0];
     const txsRes = await db.execute({
       sql: 'SELECT * FROM caja_transactions WHERE session_id = ?',
       args: [session.id]
@@ -1114,40 +1131,40 @@ app.post('/api/caja/session/close', async (req, res) => {
         sql: "UPDATE caja_sessions SET status = 'CERRADA', closed_at = ? WHERE id = ?",
         args: [closedAt, session.id]
       });
+      await tx.execute({
+        sql: 'INSERT INTO caja_closures (session_id, calculated_balance_bss, real_balance_bss, discrepancy_bss, closure_date, notes) VALUES (?, ?, ?, ?, ?, ?)',
+        args: [session.id, totalBSS, parsedReal, discrepancy, closedAt, notes || '']
+      });
       await tx.commit();
     } catch (err) {
       await tx.rollback();
       throw err;
+    } finally {
+      tx.close();
     }
 
-    await tx.execute({
-      sql: 'INSERT INTO caja_closures (session_id, calculated_balance_bss, real_balance_bss, discrepancy_bss, closure_date, notes) VALUES (?, ?, ?, ?, ?, ?)',
-      args: [session.id, totalBSS, parsedReal, discrepancy, closedAt, notes || '']
+    res.json({
+      success: true,
+      session: {
+        id: Number(session.id),
+        openedBy: session.opened_by as string,
+        openedAt: session.opened_at as string,
+        closedAt,
+        initialBalance: Number(session.initial_balance),
+        status: 'CERRADA'
+      },
+      closure: {
+        sessionId: Number(session.id),
+        calculatedBalanceBSS: totalBSS,
+        realBalanceBSS: parsedReal,
+        discrepancyBSS: discrepancy,
+        closureDate: closedAt,
+        notes: notes || ''
+      }
     });
-  });
-
-res.json({
-  success: true,
-  session: {
-    id: Number(session.id),
-    openedBy: session.opened_by as string,
-    openedAt: session.opened_at as string,
-    closedAt,
-    initialBalance: Number(session.initial_balance),
-    status: 'CERRADA'
-  },
-  closure: {
-    sessionId: Number(session.id),
-    calculatedBalanceBSS: totalBSS,
-    realBalanceBSS: parsedReal,
-    discrepancyBSS: discrepancy,
-    closureDate: closedAt,
-    notes: notes || ''
-  }
-});
   } catch (err: any) {
-  res.status(500).json({ error: err.message });
-}
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // Execute FIFO reconciliation for a selected client
@@ -1179,7 +1196,8 @@ app.post('/api/reconciliation/execute', async (req, res) => {
     let totalAmountApplied = 0;
     const generatedApplications: any[] = [];
 
-    await db.transaction('write', async (tx) => {
+    const tx = await db.transaction('write');
+    try {
       for (const invoice of clientInvoices) {
         let invRemaining = Number(invoice.remaining_amount);
         if (invRemaining <= 0) continue;
@@ -1245,7 +1263,13 @@ app.post('/api/reconciliation/execute', async (req, res) => {
         sql: 'UPDATE clients SET saldo_pendiente = ?, estado_saldo = ? WHERE id = ?',
         args: [newPending, cliStatus, clientId]
       });
-    });
+      await tx.commit();
+    } catch (err) {
+      await tx.rollback();
+      throw err;
+    } finally {
+      tx.close();
+    }
 
     res.json({
       success: true,
