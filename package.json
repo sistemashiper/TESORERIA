@@ -25,7 +25,13 @@
     "react": "^19.0.1",
     "react-dom": "^19.0.1",
     "vite": "^6.2.3",
-    "@rollup/rollup-linux-x64-gnu": "^4.0.0"
+    "@rollup/rollup-linux-x64-gnu": "^4.0.0",
+    "rollup": "^4.0.0"
+  },
+  "overrides": {
+    "vite": {
+      "rollup": "npm:@rollup/wasm-node"
+    }
   },
   "devDependencies": {
     "@types/express": "^4.17.21",
