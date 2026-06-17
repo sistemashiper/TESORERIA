@@ -1,11 +1,21 @@
 {
-  "buildCommand": "npm run build:local",
+  "buildCommand": "npm run build",
   "outputDirectory": "dist",
   "framework": "vite",
+  "functions": {
+    "server.ts": {
+      "runtime": "nodejs18.x",
+      "maxDuration": 30
+    }
+  },
   "rewrites": [
     {
       "source": "/api/(.*)",
-      "destination": "/api/index.ts"
+      "destination": "/server.ts"
+    },
+    {
+      "source": "/(.*)",
+      "destination": "/server.ts"
     }
   ]
 }
