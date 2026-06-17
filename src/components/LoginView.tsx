@@ -11,6 +11,29 @@ export default function LoginView({ onLoginSuccess }: LoginViewProps) {
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
+  const [infoMessage, setInfoMessage] = useState('');
+
+  const handleRecover = async () => {
+    if (!email) {
+      setInfoMessage('Ingrese su correo para recuperar la contraseña');
+      return;
+    }
+    try {
+      const res = await fetch('/api/auth/recover', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setInfoMessage(`Token de recuperación: ${data.token}`);
+      } else {
+        setInfoMessage(data.error || 'Error al recuperar la contraseña');
+      }
+    } catch (e) {
+      setInfoMessage('Error de red al intentar recuperar la contraseña');
+    }
+  };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -64,6 +87,11 @@ export default function LoginView({ onLoginSuccess }: LoginViewProps) {
               {error}
             </div>
           )}
+          {infoMessage && (
+            <div className="p-3 bg-blue-50 text-blue-600 text-xs rounded-lg border border-blue-100 text-center font-medium mt-2">
+              {infoMessage}
+            </div>
+          )}
 
           {/* Email field */}
           <div className="space-y-1">
@@ -92,9 +120,9 @@ export default function LoginView({ onLoginSuccess }: LoginViewProps) {
               <label className="block text-[10px] font-bold text-slate-500 tracking-wider uppercase" htmlFor="password">
                 CONTRASEÑA
               </label>
-              <a href="#" className="text-[10px] text-slate-500 hover:text-black hover:underline transition-all font-medium">
+              <button type="button" onClick={handleRecover} className="text-[10px] text-slate-500 hover:text-black hover:underline transition-all font-medium">
                 ¿Olvidaste tu contraseña?
-              </a>
+              </button>
             </div>
             <div className="relative">
               <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400">
