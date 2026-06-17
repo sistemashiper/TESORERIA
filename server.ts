@@ -249,7 +249,7 @@ async function initializeDatabase() {
   const adminCheck = await db.execute({
     sql: 'SELECT email FROM users WHERE email = ?',
     args: ['admin@corporativo.com']
-  }
+  });
   if (adminCheck.rows.length === 0) {
     await db.execute({
       sql: 'INSERT INTO users (email, name, role, permissions, password) VALUES (?, ?, ?, ?, ?)',
