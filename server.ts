@@ -274,8 +274,15 @@ async function initializeDatabase() {
   }
 }
 
-// Initialize Turso database asynchronously in the background
-initializeDatabase().catch(console.error);
+// Initialize Turso database before handling any request to avoid race conditions in serverless environments
+// Using an async IIFE (without top‑level await) so the module remains valid in both CommonJS and ESM.
+(async () => {
+  try {
+    await initializeDatabase();
+  } catch (e) {
+    console.error('Error initializing database:', e);
+  }
+})();
 
 export const app = express();
 const PORT = parseInt(process.env.PORT || '3000', 10);
