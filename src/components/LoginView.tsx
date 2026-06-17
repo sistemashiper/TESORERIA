@@ -7,7 +7,8 @@ interface LoginViewProps {
 
 export default function LoginView({ onLoginSuccess }: LoginViewProps) {
   const [email, setEmail] = useState('admin@corporativo.com');
-  const [password, setPassword] = useState('••••••••');
+  // Use the known default admin password for quick testing; replace with secure handling in production
+  const [password, setPassword] = useState('admin');
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
