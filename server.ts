@@ -5,7 +5,8 @@ import { GoogleGenAI } from '@google/genai';
 import dotenv from 'dotenv';
 import { createClient } from '@libsql/client';
 import { Client, Invoice, Advance, Application, User, CajaSession, CajaTransaction, CajaClosure } from './src/types';
-import { initialClients, initialInvoices, initialAdvances, initialApplications } from './src/initialData';
+// Added explicit .js extension for Vercel production compatibility
+import { initialClients, initialInvoices, initialAdvances, initialApplications } from './src/initialData.js';
 
 dotenv.config();
 
