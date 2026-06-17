@@ -22,7 +22,6 @@ async function run() {
             }
         }
 
-
         // Remove any existing admin user
         await db.execute({ sql: "DELETE FROM users WHERE email = 'admin@corporativo.com'" });
         console.log('Usuario admin eliminado (si existía).');
