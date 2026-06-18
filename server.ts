@@ -26,6 +26,7 @@ let exchangeRatesState = {
   lastUpdated: new Date().toISOString().split('T')[0]
 };
 
+
 // Helper to simulate daily exchange rate updates
 function updateRatesDaily() {
   const today = new Date().toISOString().split('T')[0];
