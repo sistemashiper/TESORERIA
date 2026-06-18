@@ -1,9 +1,10 @@
 import express from 'express';
 import path from 'path';
+import { supabase } from './src/supabaseClient';
 import { createServer as createViteServer } from 'vite';
 import { GoogleGenAI } from '@google/genai';
 import dotenv from 'dotenv';
-import { createClient } from '@libsql/client';
+// import { createClient } from '@libsql/client'; // Turso client disabled in favor of Supabase
 import { Client, Invoice, Advance, Application, User, CajaSession, CajaTransaction, CajaClosure } from './src/types';
 // Added explicit .js extension for Vercel production compatibility
 import { initialClients, initialInvoices, initialAdvances, initialApplications } from './src/initialData.js';
@@ -11,10 +12,8 @@ import { initialClients, initialInvoices, initialAdvances, initialApplications }
 dotenv.config();
 
 // Initialize Turso client (uses local file-based database for development, remote cloud DB in production)
-const db = createClient({
-  url: process.env.TURSO_DATABASE_URL || 'file:local.db',
-  authToken: process.env.TURSO_AUTH_TOKEN || '',
-});
+// Turso client disabled. Placeholder to avoid reference errors.
+const db: any = null;
 
 // Exchange rates (kept in memory for live session simulation)
 let exchangeRatesState = {
@@ -306,14 +305,15 @@ app.get('/api/rates/bcv', (req, res) => {
 app.post('/api/auth/login', async (req, res) => {
   try {
     const { email, password } = req.body;
-    const userRes = await db.execute({
-      sql: 'SELECT * FROM users WHERE email = ?',
-      args: [email]
-    });
-    if (userRes.rows.length === 0) {
+    // Use Supabase to fetch the user
+    const { data: row, error } = await supabase
+      .from('users')
+      .select('*')
+      .eq('email', email)
+      .single();
+    if (error || !row) {
       return res.status(401).json({ success: false, error: 'Credenciales inválidas.' });
     }
-    const row = userRes.rows[0];
     if (row.password !== password) {
       return res.status(401).json({ success: false, error: 'Credenciales inválidas.' });
     }

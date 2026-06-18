@@ -1,12 +1,10 @@
-import { createClient } from '@libsql/client';
+// import { createClient } from '@libsql/client'; // Turso client disabled
 import * as dotenv from 'dotenv';
 
 dotenv.config();
 
-const db = createClient({
-    url: process.env.TURSO_DATABASE_URL || 'file:local.db',
-    authToken: process.env.TURSO_AUTH_TOKEN || ''
-});
+// Turso client disabled. Supabase client can be used here if needed.
+const db: any = null;
 
 async function resetAdmin() {
     // Delete existing admin user if present
