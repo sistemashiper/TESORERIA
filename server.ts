@@ -11,9 +11,13 @@ import { initialClients, initialInvoices, initialAdvances, initialApplications }
 
 dotenv.config();
 
-// Initialize Turso client (uses local file-based database for development, remote cloud DB in production)
-// Turso client disabled. Placeholder to avoid reference errors.
-const db: any = null;
+// Initialize Supabase client for database operations (replaces Turso/SQLite)
+// Supabase client is imported from src/supabaseClient.ts and provides CRUD methods.
+// We'll use the generic `supabase` instance for all table operations.
+// Note: For simplicity, we keep the same function signatures but delegate to Supabase.
+// Example usage: await supabase.from('clients').select('*')
+// The original `db` variable is no longer needed.
+const db = null; // placeholder to keep existing code structure; will be replaced in functions below.
 
 // Exchange rates (kept in memory for live session simulation)
 let exchangeRatesState = {
@@ -445,12 +449,14 @@ app.post('/api/auth/update-user-permissions', async (req, res) => {
   }
 });
 
-// Full database fetch
+// Full database fetch – now using Supabase instead of Turso/SQLite
 app.get('/api/database', async (req, res) => {
   try {
     // 1. Fetch Clients
-    const clientsRes = await db.execute('SELECT * FROM clients');
-    const clients = clientsRes.rows.map(r => ({
+    const { data: clients, error: errClients } = await supabase.from('clients').select('*');
+    if (errClients) throw errClients;
+
+    const clientsMapped = (clients || []).map(r => ({
       id: r.id as string,
       cedula: r.cedula as string,
       name: r.name as string,
@@ -462,39 +468,38 @@ app.get('/api/database', async (req, res) => {
       saldoPendiente: Number(r.saldo_pendiente),
       estadoSaldo: r.estado_saldo as string,
       ultimoPago: 'Hoy, Registro',
-      createdAt: r.created_at as string
+      createdAt: r.created_at as string,
     }));
 
-    // 2. Fetch Invoices
-    const invoicesRes = await db.execute(`
-        SELECT invoices.*, clients.name AS client_name 
-        FROM invoices 
-        LEFT JOIN clients ON invoices.client_id = clients.id
-      `);
-    const invoices = invoicesRes.rows.map(r => ({
+    // 2. Fetch Invoices with client name
+    const { data: invoices, error: errInvoices } = await supabase
+      .from('invoices')
+      .select('*, client_name:name')
+      .order('id');
+    if (errInvoices) throw errInvoices;
+    const invoicesMapped = (invoices || []).map(r => ({
       id: r.id as string,
       clientId: r.client_id as string,
-      clientName: r.client_name as string,
+      clientName: (r as any).client_name as string,
       reference: r.id as string,
       amount: Number(r.amount),
       remainingAmount: Number(r.remaining_amount),
       date: r.date as string,
       status: r.status as string,
       description: r.description as string || '',
-      isUrgente: r.is_urgente === 1
+      isUrgente: r.is_urgente === 1,
     }));
 
-    // 3. Fetch Advances (with photoUrl joined from advance_images table)
-    const advancesRes = await db.execute(`
-        SELECT advances.*, clients.name AS client_name, advance_images.photo_base64 AS photo_url 
-        FROM advances 
-        LEFT JOIN clients ON advances.client_id = clients.id
-        LEFT JOIN advance_images ON advances.id = advance_images.advance_id
-      `);
-    const advances = advancesRes.rows.map(r => ({
+    // 3. Fetch Advances with client name and optional photo
+    const { data: advances, error: errAdvances } = await supabase
+      .from('advances')
+      .select('*, client_name:name, photo_url:advance_images(photo_base64)')
+      .order('id');
+    if (errAdvances) throw errAdvances;
+    const advancesMapped = (advances || []).map(r => ({
       id: r.id as string,
       clientId: r.client_id as string,
-      clientName: r.client_name as string,
+      clientName: (r as any).client_name as string,
       reference: r.reference as string,
       paymentType: r.payment_type as string,
       rateType: 'BCV',
