@@ -43,239 +43,68 @@ function updateRatesDaily() {
 }
 
 async function initializeDatabase() {
-  console.log('Inicializando base de datos SQLite / Turso...');
+  console.log('Inicializando base de datos en Supabase...');
+  try {
+    // Verificar si la tabla users tiene registros
+    const { count, error: countErr } = await supabase
+      .from('users')
+      .select('*', { count: 'exact', head: true });
 
-  // 1. Crear tabla users
-  await db.execute(`
-    CREATE TABLE IF NOT EXISTS users (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      email TEXT UNIQUE NOT NULL,
-      name TEXT NOT NULL,
-      role TEXT NOT NULL,
-      permissions TEXT NOT NULL,
-      password TEXT NOT NULL DEFAULT ''
-    )
-  `);
-
-  // 2. Crear tabla clients
-  await db.execute(`
-    CREATE TABLE IF NOT EXISTS clients (
-      id TEXT PRIMARY KEY,
-      cedula TEXT UNIQUE NOT NULL,
-      name TEXT NOT NULL,
-      category TEXT NOT NULL,
-      address TEXT,
-      phone TEXT,
-      email TEXT,
-      saldo_pendiente REAL DEFAULT 0.0,
-      estado_saldo TEXT DEFAULT 'Al Corriente',
-      created_at TEXT NOT NULL
-    )
-  `);
-
-  // 3. Crear tabla invoices
-  await db.execute(`
-    CREATE TABLE IF NOT EXISTS invoices (
-      id TEXT PRIMARY KEY,
-      client_id TEXT REFERENCES clients(id) ON DELETE CASCADE,
-      amount REAL NOT NULL,
-      remaining_amount REAL NOT NULL,
-      date TEXT NOT NULL,
-      status TEXT DEFAULT 'PENDIENTE',
-      description TEXT,
-      is_urgente INTEGER DEFAULT 0
-    )
-  `);
-
-  // 4. Crear tabla advances
-  await db.execute(`
-    CREATE TABLE IF NOT EXISTS advances (
-      id TEXT PRIMARY KEY,
-      client_id TEXT REFERENCES clients(id) ON DELETE CASCADE,
-      reference TEXT NOT NULL,
-      payment_type TEXT NOT NULL,
-      amount REAL NOT NULL,
-      rate_bcv REAL NOT NULL,
-      amount_bss REAL NOT NULL,
-      remaining_amount REAL NOT NULL,
-      description TEXT,
-      date TEXT NOT NULL,
-      status TEXT DEFAULT 'PENDIENTE_VALIDACION',
-      registered_by TEXT NOT NULL,
-      created_at TEXT NOT NULL
-    )
-  `);
-
-  // 5. Crear tabla advance_images (Separada para rendimiento)
-  await db.execute(`
-    CREATE TABLE IF NOT EXISTS advance_images (
-      advance_id TEXT PRIMARY KEY REFERENCES advances(id) ON DELETE CASCADE,
-      photo_base64 TEXT NOT NULL
-    )
-  `);
-
-  // 6. Crear tabla applications
-  await db.execute(`
-    CREATE TABLE IF NOT EXISTS applications (
-      id TEXT PRIMARY KEY,
-      invoice_id TEXT REFERENCES invoices(id),
-      advance_id TEXT REFERENCES advances(id),
-      amount_applied REAL NOT NULL,
-      amount_applied_bss REAL NOT NULL,
-      rate_bcv REAL NOT NULL,
-      date TEXT NOT NULL,
-      status TEXT DEFAULT 'PENDIENTE_AUDITORIA',
-      audit_notes TEXT,
-      created_at TEXT NOT NULL
-    )
-  `);
-
-  // 7. Crear tabla caja_sessions
-  await db.execute(`
-    CREATE TABLE IF NOT EXISTS caja_sessions (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      opened_by TEXT NOT NULL,
-      opened_at TEXT NOT NULL,
-      closed_at TEXT,
-      initial_balance REAL NOT NULL,
-      status TEXT DEFAULT 'ABIERTA'
-    )
-  `);
-
-  // 8. Crear tabla caja_transactions
-  await db.execute(`
-    CREATE TABLE IF NOT EXISTS caja_transactions (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      session_id INTEGER REFERENCES caja_sessions(id) ON DELETE CASCADE,
-      type TEXT NOT NULL,
-      payment_method TEXT NOT NULL,
-      currency TEXT NOT NULL,
-      amount REAL NOT NULL,
-      rate_bcv REAL NOT NULL,
-      description TEXT,
-      created_at TEXT NOT NULL
-    )
-  `);
-
-  // 9. Crear tabla caja_closures
-  await db.execute(`
-    CREATE TABLE IF NOT EXISTS caja_closures (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      session_id INTEGER UNIQUE REFERENCES caja_sessions(id),
-      calculated_balance_bss REAL NOT NULL,
-      real_balance_bss REAL NOT NULL,
-      discrepancy_bss REAL NOT NULL,
-      closure_date TEXT NOT NULL,
-      notes TEXT
-    )
-  `);
-
-  console.log('Tablas inicializadas en SQLite/Turso.');
-
-  // Siembra de datos si la tabla users está vacía
-  const userCheck = await db.execute('SELECT count(*) as count FROM users');
-  const count = Number(userCheck.rows[0].count);
-
-  if (count === 0) {
-    console.log('Sembrando datos por defecto en base de datos vacía...');
-
-    // Sembrar usuarios
-    const usersSeed = [
-      { email: 'ventas@corporativo.com', name: 'Vendedor Demo', role: 'Ventas', permissions: JSON.stringify(['canRegisterClients', 'canRegisterAdvances']) },
-      { email: 'tesoreria@corporativo.com', name: 'Tesorero Demo', role: 'Tesoreria', permissions: JSON.stringify(['canRegisterClients', 'canRegisterAdvances', 'canVerifyAdvances', 'canApplyAdvances', 'canManageCaja']) },
-      { email: 'gerencia@corporativo.com', name: 'Gerente Demo', role: 'Gerencia', permissions: JSON.stringify(['canRegisterClients', 'canRegisterAdvances', 'canVerifyAdvances', 'canApplyAdvances', 'canAuditApplications', 'canManageCaja', 'canAuditCaja', 'canManageUsers']) },
-      { email: 'admin@corporativo.com', name: 'Administrador Demo', role: 'Administrador', permissions: JSON.stringify(['canRegisterClients', 'canRegisterAdvances', 'canVerifyAdvances', 'canApplyAdvances', 'canAuditApplications', 'canManageCaja', 'canAuditCaja', 'canManageUsers']) }
-    ];
-
-    for (const u of usersSeed) {
-      await db.execute({
-        sql: 'INSERT INTO users (email, name, role, permissions, password) VALUES (?, ?, ?, ?, ?)',
-        args: [u.email, u.name, u.role, u.permissions, 'admin']
-      });
+    if (countErr) {
+      console.error('Error al verificar usuarios en Supabase:', countErr);
+      return;
     }
 
-    // Sembrar clientes
-    const initialClientsSeed = initialClients.map((c, i) => ({
-      id: c.id,
-      cedula: c.rfc || `V-20${123456 + i}`,
-      name: c.name,
-      category: c.category || 'Corporativo',
-      address: c.address || '',
-      phone: c.phone || '',
-      email: c.email || '',
-      saldo_pendiente: 0.0,
-      estado_saldo: 'Al Corriente',
-      created_at: new Date().toISOString().split('T')[0]
-    }));
+    if (count === 0) {
+      console.log('Sembrando usuarios por defecto en Supabase...');
+      const usersSeed = [
+        { email: 'ventas@corporativo.com', name: 'Vendedor Demo', role: 'Ventas', permissions: JSON.stringify(['canRegisterClients', 'canRegisterAdvances']), password: 'admin' },
+        { email: 'tesoreria@corporativo.com', name: 'Tesorero Demo', role: 'Tesoreria', permissions: JSON.stringify(['canRegisterClients', 'canRegisterAdvances', 'canVerifyAdvances', 'canApplyAdvances', 'canManageCaja']), password: 'admin' },
+        { email: 'gerencia@corporativo.com', name: 'Gerente Demo', role: 'Gerencia', permissions: JSON.stringify(['canRegisterClients', 'canRegisterAdvances', 'canVerifyAdvances', 'canApplyAdvances', 'canAuditApplications', 'canManageCaja', 'canAuditCaja', 'canManageUsers']), password: 'admin' },
+        { email: 'admin@corporativo.com', name: 'Administrador Demo', role: 'Administrador', permissions: JSON.stringify(['canRegisterClients', 'canRegisterAdvances', 'canVerifyAdvances', 'canApplyAdvances', 'canAuditApplications', 'canManageCaja', 'canAuditCaja', 'canManageUsers']), password: 'admin' }
+      ];
 
-    for (const c of initialClientsSeed) {
-      await db.execute({
-        sql: 'INSERT INTO clients (id, cedula, name, category, address, phone, email, saldo_pendiente, estado_saldo, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-        args: [c.id, c.cedula, c.name, c.category, c.address, c.phone, c.email, c.saldo_pendiente, c.estado_saldo, c.created_at]
-      });
+      const { error: insertErr } = await supabase.from('users').insert(usersSeed);
+      if (insertErr) {
+        console.error('Error al sembrar usuarios:', insertErr);
+      } else {
+        console.log('Usuarios sembrados con éxito.');
+      }
+    } else {
+      // Asegurar que existe el administrador por defecto
+      const { data: adminUser, error: adminErr } = await supabase
+        .from('users')
+        .select('email')
+        .eq('email', 'admin@corporativo.com')
+        .maybeSingle();
+
+      if (!adminUser && !adminErr) {
+        console.log('Creando usuario administrador por defecto...');
+        const { error: createAdminErr } = await supabase.from('users').insert({
+          email: 'admin@corporativo.com',
+          name: 'Administrador Demo',
+          role: 'Administrador',
+          permissions: JSON.stringify([
+            'canRegisterClients',
+            'canRegisterAdvances',
+            'canVerifyAdvances',
+            'canApplyAdvances',
+            'canAuditApplications',
+            'canManageCaja',
+            'canAuditCaja',
+            'canManageUsers'
+          ]),
+          password: 'admin'
+        });
+        if (createAdminErr) {
+          console.error('Error al crear administrador por defecto:', createAdminErr);
+        } else {
+          console.log('Administrador por defecto creado con éxito.');
+        }
+      }
     }
-
-    // Sembrar invoices
-    for (const inv of initialInvoices) {
-      await db.execute({
-        sql: 'INSERT INTO invoices (id, client_id, amount, remaining_amount, date, status, description, is_urgente) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-        args: [inv.id, inv.clientId, inv.amount, inv.remainingAmount, inv.date, inv.status, inv.description || '', inv.isUrgente ? 1 : 0]
-      });
-    }
-
-    // Sembrar advances
-    const initialAdvancesSeed = initialAdvances.map(a => ({
-      id: a.id,
-      client_id: a.clientId,
-      reference: a.reference,
-      payment_type: 'Zelle',
-      amount: a.amount,
-      rate_bcv: 36.50,
-      amount_bss: a.amount * 36.50,
-      remaining_amount: a.amount,
-      description: a.description || '',
-      date: a.date,
-      status: 'DISPONIBLE',
-      registered_by: 'ventas@corporativo.com',
-      created_at: new Date().toISOString()
-    }));
-
-    for (const adv of initialAdvancesSeed) {
-      await db.execute({
-        sql: 'INSERT INTO advances (id, client_id, reference, payment_type, amount, rate_bcv, amount_bss, remaining_amount, description, date, status, registered_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-        args: [adv.id, adv.client_id, adv.reference, adv.payment_type, adv.amount, adv.rate_bcv, adv.amount_bss, adv.remaining_amount, adv.description, adv.date, adv.status, adv.registered_by, adv.created_at]
-      });
-    }
-
-    console.log('Siembra de datos completada.');
-  }
-
-  // Asegurar que existe el usuario administrador por defecto
-  const adminCheck = await db.execute({
-    sql: 'SELECT email FROM users WHERE email = ?',
-    args: ['admin@corporativo.com']
-  });
-  if (adminCheck.rows.length === 0) {
-    await db.execute({
-      sql: 'INSERT INTO users (email, name, role, permissions, password) VALUES (?, ?, ?, ?, ?)',
-      args: [
-        'admin@corporativo.com',
-        'Administrador Demo',
-        'Administrador',
-        JSON.stringify([
-          'canRegisterClients',
-          'canRegisterAdvances',
-          'canVerifyAdvances',
-          'canApplyAdvances',
-          'canAuditApplications',
-          'canManageCaja',
-          'canAuditCaja',
-          'canManageUsers'
-        ]),
-        'admin'
-      ]
-    });
-    console.log('Usuario administrador creado por defecto.');
+  } catch (e) {
+    console.error('Error al conectar con Supabase en la inicialización:', e);
   }
 }
 
@@ -343,19 +172,21 @@ app.post('/api/auth/recover', async (req, res) => {
     if (!email) {
       return res.status(400).json({ error: 'Correo es obligatorio.' });
     }
-    const userRes = await db.execute({
-      sql: 'SELECT * FROM users WHERE email = ?',
-      args: [email]
-    });
-    if (userRes.rows.length === 0) {
+    const { data: user, error } = await supabase
+      .from('users')
+      .select('*')
+      .eq('email', email)
+      .maybeSingle();
+    if (error || !user) {
       return res.status(404).json({ error: 'Usuario no encontrado.' });
     }
     // Generate a simple random token as temporary password
     const token = Math.random().toString(36).slice(-8);
-    await db.execute({
-      sql: 'UPDATE users SET password = ? WHERE email = ?',
-      args: [token, email]
-    });
+    const { error: updateErr } = await supabase
+      .from('users')
+      .update({ password: token })
+      .eq('email', email);
+    if (updateErr) throw updateErr;
     // In a real app, send token via email. Here we return it for testing.
     res.json({ success: true, token });
   } catch (err: any) {
@@ -371,17 +202,20 @@ app.post('/api/auth/reset', async (req, res) => {
     if (!email || !token || !newPassword) {
       return res.status(400).json({ error: 'Campos obligatorios: email, token, newPassword.' });
     }
-    const userRes = await db.execute({
-      sql: 'SELECT * FROM users WHERE email = ? AND password = ?',
-      args: [email, token]
-    });
-    if (userRes.rows.length === 0) {
+    const { data: user, error } = await supabase
+      .from('users')
+      .select('*')
+      .eq('email', email)
+      .eq('password', token)
+      .maybeSingle();
+    if (error || !user) {
       return res.status(400).json({ error: 'Token inválido o usuario no encontrado.' });
     }
-    await db.execute({
-      sql: 'UPDATE users SET password = ? WHERE email = ?',
-      args: [newPassword, email]
-    });
+    const { error: updateErr } = await supabase
+      .from('users')
+      .update({ password: newPassword })
+      .eq('email', email);
+    if (updateErr) throw updateErr;
     res.json({ success: true });
   } catch (err: any) {
     console.error(err);
@@ -392,14 +226,17 @@ app.post('/api/auth/reset', async (req, res) => {
 // User management endpoints
 app.get('/api/auth/users', async (req, res) => {
   try {
-    const usersRes = await db.execute('SELECT * FROM users');
-    const users = usersRes.rows.map(r => ({
+    const { data: users, error } = await supabase
+      .from('users')
+      .select('*');
+    if (error) throw error;
+    const usersMapped = (users || []).map(r => ({
       email: r.email,
       name: r.name,
       role: r.role,
       permissions: JSON.parse(r.permissions as string)
     }));
-    res.json(users);
+    res.json(usersMapped);
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
@@ -411,18 +248,25 @@ app.post('/api/auth/register-user', async (req, res) => {
     if (!email || !name || !role) {
       return res.status(400).json({ error: 'Correo, Nombre y Rol son obligatorios.' });
     }
-    const exists = await db.execute({
-      sql: 'SELECT email FROM users WHERE email = ?',
-      args: [email]
-    });
-    if (exists.rows.length > 0) {
+    const { data: existingUser, error: checkErr } = await supabase
+      .from('users')
+      .select('email')
+      .eq('email', email)
+      .maybeSingle();
+    if (existingUser) {
       return res.status(400).json({ error: 'El usuario ya existe.' });
     }
     const perms = permissions || [];
-    await db.execute({
-      sql: 'INSERT INTO users (email, name, role, permissions, password) VALUES (?, ?, ?, ?, ?)',
-      args: [email, name, role, JSON.stringify(perms), 'admin']
-    });
+    const { error: insertErr } = await supabase
+      .from('users')
+      .insert({
+        email,
+        name,
+        role,
+        permissions: JSON.stringify(perms),
+        password: 'admin'
+      });
+    if (insertErr) throw insertErr;
     res.status(201).json({ email, name, role, permissions: perms });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
@@ -432,17 +276,19 @@ app.post('/api/auth/register-user', async (req, res) => {
 app.post('/api/auth/update-user-permissions', async (req, res) => {
   try {
     const { email, permissions } = req.body;
-    const userRes = await db.execute({
-      sql: 'SELECT * FROM users WHERE email = ?',
-      args: [email]
-    });
-    if (userRes.rows.length === 0) {
+    const { data: user, error: checkErr } = await supabase
+      .from('users')
+      .select('email')
+      .eq('email', email)
+      .maybeSingle();
+    if (checkErr || !user) {
       return res.status(404).json({ error: 'Usuario no encontrado.' });
     }
-    await db.execute({
-      sql: 'UPDATE users SET permissions = ? WHERE email = ?',
-      args: [JSON.stringify(permissions), email]
-    });
+    const { error: updateErr } = await supabase
+      .from('users')
+      .update({ permissions: JSON.stringify(permissions) })
+      .eq('email', email);
+    if (updateErr) throw updateErr;
     res.json({ email, permissions });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
@@ -453,7 +299,10 @@ app.post('/api/auth/update-user-permissions', async (req, res) => {
 app.get('/api/database', async (req, res) => {
   try {
     // 1. Fetch Clients
-    const { data: clients, error: errClients } = await supabase.from('clients').select('*');
+    const { data: clients, error: errClients } = await supabase
+      .from('clients')
+      .select('*')
+      .order('name');
     if (errClients) throw errClients;
 
     const clientsMapped = (clients || []).map(r => ({
@@ -474,13 +323,14 @@ app.get('/api/database', async (req, res) => {
     // 2. Fetch Invoices with client name
     const { data: invoices, error: errInvoices } = await supabase
       .from('invoices')
-      .select('*, client_name:name')
+      .select('*, clients(name)')
       .order('id');
     if (errInvoices) throw errInvoices;
+
     const invoicesMapped = (invoices || []).map(r => ({
       id: r.id as string,
       clientId: r.client_id as string,
-      clientName: (r as any).client_name as string,
+      clientName: r.clients ? (r.clients as any).name as string : '',
       reference: r.id as string,
       amount: Number(r.amount),
       remainingAmount: Number(r.remaining_amount),
@@ -493,55 +343,67 @@ app.get('/api/database', async (req, res) => {
     // 3. Fetch Advances with client name and optional photo
     const { data: advances, error: errAdvances } = await supabase
       .from('advances')
-      .select('*, client_name:name, photo_url:advance_images(photo_base64)')
+      .select('*, clients(name), advance_images(photo_base64)')
       .order('id');
     if (errAdvances) throw errAdvances;
-    const advancesMapped = (advances || []).map(r => ({
-      id: r.id as string,
-      clientId: r.client_id as string,
-      clientName: (r as any).client_name as string,
-      reference: r.reference as string,
-      paymentType: r.payment_type as string,
-      rateType: 'BCV',
-      amount: Number(r.amount),
-      rateBCV: Number(r.rate_bcv),
-      amountInBSS: Number(r.amount_bss),
-      remainingAmount: Number(r.remaining_amount),
-      date: r.date as string,
-      status: r.status as string,
-      description: r.description as string || '',
-      photoUrl: r.photo_url as string || '',
-      registeredBy: r.registered_by as string
-    }));
+
+    const advancesMapped = (advances || []).map(r => {
+      const img = r.advance_images;
+      const photoBase64 = img 
+        ? (Array.isArray(img) ? (img[0] ? (img[0] as any).photo_base64 : '') : (img as any).photo_base64)
+        : '';
+      return {
+        id: r.id as string,
+        clientId: r.client_id as string,
+        clientName: r.clients ? (r.clients as any).name as string : '',
+        reference: r.reference as string,
+        paymentType: r.payment_type as string,
+        rateType: 'BCV',
+        amount: Number(r.amount),
+        rateBCV: Number(r.rate_bcv),
+        amountInBSS: Number(r.amount_bss),
+        remainingAmount: Number(r.remaining_amount),
+        date: r.date as string,
+        status: r.status as string,
+        description: r.description as string || '',
+        photoUrl: photoBase64 || '',
+        registeredBy: r.registered_by as string
+      };
+    });
 
     // 4. Fetch Applications
-    const appsRes = await db.execute(`
-        SELECT 
-          applications.*, 
-          invoices.id AS invoice_reference, 
-          advances.reference AS advance_reference,
-          clients.name AS client_name
-        FROM applications
-        LEFT JOIN invoices ON applications.invoice_id = invoices.id
-        LEFT JOIN advances ON applications.advance_id = advances.id
-        LEFT JOIN clients ON advances.client_id = clients.id
-      `);
-    const applications = appsRes.rows.map(r => ({
-      id: r.id as string,
-      invoiceId: r.invoice_id as string,
-      invoiceReference: r.invoice_reference as string,
-      advanceId: r.advance_id as string,
-      advanceReference: r.advance_reference as string,
-      clientName: r.client_name as string,
-      amountApplied: Number(r.amount_applied),
-      amountAppliedBSS: Number(r.amount_applied_bss),
-      rateBCV: Number(r.rate_bcv),
-      date: r.date as string,
-      status: r.status as string,
-      auditNotes: r.audit_notes as string || ''
-    }));
+    const { data: apps, error: errApps } = await supabase
+      .from('applications')
+      .select('*, invoices(id), advances(reference, clients(name))');
+    if (errApps) throw errApps;
 
-    res.json({ clients, invoices, advances, applications });
+    const applicationsMapped = (apps || []).map(r => {
+      const adv = r.advances as any;
+      const clientName = adv && adv.clients ? adv.clients.name : '';
+      const invoiceReference = r.invoices ? r.invoices.id : '';
+      const advanceReference = adv ? adv.reference : '';
+      return {
+        id: r.id as string,
+        invoiceId: r.invoice_id as string,
+        invoiceReference: invoiceReference as string,
+        advanceId: r.advance_id as string,
+        advanceReference: advanceReference as string,
+        clientName: clientName as string,
+        amountApplied: Number(r.amount_applied),
+        amountAppliedBSS: Number(r.amount_applied_bss),
+        rateBCV: Number(r.rate_bcv),
+        date: r.date as string,
+        status: r.status as string,
+        auditNotes: r.audit_notes as string || ''
+      };
+    });
+
+    res.json({
+      clients: clientsMapped,
+      invoices: invoicesMapped,
+      advances: advancesMapped,
+      applications: applicationsMapped
+    });
   } catch (err: any) {
     console.error(err);
     res.status(500).json({ error: err.message });
@@ -557,22 +419,36 @@ app.post('/api/clients', async (req, res) => {
     }
 
     // Check if client with this cedula already exists
-    const exists = await db.execute({
-      sql: 'SELECT id FROM clients WHERE cedula = ?',
-      args: [cedula]
-    });
-    if (exists.rows.length > 0) {
+    const { data: exists, error: checkErr } = await supabase
+      .from('clients')
+      .select('id')
+      .eq('cedula', cedula)
+      .maybeSingle();
+
+    if (checkErr) throw checkErr;
+    if (exists) {
       return res.status(400).json({ error: 'Ya existe un cliente registrado con esta Cédula.' });
     }
 
     const newId = `C-${Math.floor(10000 + Math.random() * 90000)}`;
     const createdAt = new Date().toISOString().split('T')[0];
 
-    await db.execute({
-      sql: `INSERT INTO clients (id, cedula, name, category, address, phone, email, saldo_pendiente, estado_saldo, created_at)
-              VALUES (?, ?, ?, ?, ?, ?, ?, 0.0, 'Al Corriente', ?)`,
-      args: [newId, cedula, name, category || 'Corporativo', address || '', phone || '', email || '', createdAt]
-    });
+    const { error: insertErr } = await supabase
+      .from('clients')
+      .insert({
+        id: newId,
+        cedula,
+        name,
+        category: category || 'Corporativo',
+        address: address || '',
+        phone: phone || '',
+        email: email || '',
+        saldo_pendiente: 0.0,
+        estado_saldo: 'Al Corriente',
+        created_at: createdAt
+      });
+
+    if (insertErr) throw insertErr;
 
     const newClient = {
       id: newId,
@@ -604,46 +480,51 @@ app.post('/api/transactions', async (req, res) => {
       return res.status(400).json({ error: 'Cliente, Monto y Referencia son obligatorios.' });
     }
 
-    const clientRes = await db.execute({
-      sql: 'SELECT * FROM clients WHERE id = ?',
-      args: [clientId]
-    });
-    if (clientRes.rows.length === 0) {
+    const { data: clientRow, error: clientErr } = await supabase
+      .from('clients')
+      .select('*')
+      .eq('id', clientId)
+      .single();
+    if (clientErr || !clientRow) {
       return res.status(404).json({ error: 'Cliente no encontrado.' });
     }
-    const clientRow = clientRes.rows[0];
 
     const numericAmount = parseFloat(amount);
     const txDate = date || new Date().toISOString().split('T')[0];
 
     if (type === 'factura') {
-      const tx = await db.transaction('write');
-      try {
-        const invExists = await tx.execute({
-          sql: 'SELECT id FROM invoices WHERE id = ?',
-          args: [reference]
-        });
-        if (invExists.rows.length > 0) {
-          throw new Error('Ya existe una factura con esta referencia/ID.');
-        }
-
-        await tx.execute({
-          sql: 'INSERT INTO invoices (id, client_id, amount, remaining_amount, date, status, description, is_urgente) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-          args: [reference, clientId, numericAmount, numericAmount, txDate, 'PENDIENTE', description || '', isUrgente ? 1 : 0]
-        });
-
-        const newPending = Number(clientRow.saldo_pendiente) + numericAmount;
-        await tx.execute({
-          sql: "UPDATE clients SET saldo_pendiente = ?, estado_saldo = 'En Revisión' WHERE id = ?",
-          args: [newPending, clientId]
-        });
-        await tx.commit();
-      } catch (err) {
-        await tx.rollback();
-        throw err;
-      } finally {
-        tx.close();
+      // Check if invoice already exists
+      const { data: invExists } = await supabase
+        .from('invoices')
+        .select('id')
+        .eq('id', reference)
+        .maybeSingle();
+      if (invExists) {
+        return res.status(400).json({ error: 'Ya existe una factura con esta referencia/ID.' });
       }
+
+      // Insert invoice
+      const { error: invInsertErr } = await supabase
+        .from('invoices')
+        .insert({
+          id: reference,
+          client_id: clientId,
+          amount: numericAmount,
+          remaining_amount: numericAmount,
+          date: txDate,
+          status: 'PENDIENTE',
+          description: description || '',
+          is_urgente: isUrgente ? 1 : 0
+        });
+      if (invInsertErr) throw invInsertErr;
+
+      // Update client pending balance
+      const newPending = Number(clientRow.saldo_pendiente) + numericAmount;
+      const { error: cliUpdateErr } = await supabase
+        .from('clients')
+        .update({ saldo_pendiente: newPending, estado_saldo: 'En Revisión' })
+        .eq('id', clientId);
+      if (cliUpdateErr) throw cliUpdateErr;
 
       const newInvoice: Invoice = {
         id: reference,
@@ -663,34 +544,42 @@ app.post('/api/transactions', async (req, res) => {
       const parsedRate = parseFloat(rateBCV) || 36.50;
       const calcBSS = parseFloat(amountInBSS) || (numericAmount * parsedRate);
 
-      const tx = await db.transaction('write');
-      try {
-        const advExists = await tx.execute({
-          sql: 'SELECT id FROM advances WHERE id = ?',
-          args: [reference]
-        });
-        if (advExists.rows.length > 0) {
-          throw new Error('Ya existe un anticipo con esta referencia/ID.');
-        }
+      // Check if advance already exists
+      const { data: advExists } = await supabase
+        .from('advances')
+        .select('id')
+        .eq('id', reference)
+        .maybeSingle();
+      if (advExists) {
+        return res.status(400).json({ error: 'Ya existe un anticipo con esta referencia/ID.' });
+      }
 
-        await tx.execute({
-          sql: `INSERT INTO advances (id, client_id, reference, payment_type, amount, rate_bcv, amount_bss, remaining_amount, description, date, status, registered_by, created_at)
-                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'PENDIENTE_VALIDACION', ?, ?)`,
-          args: [reference, clientId, reference, paymentType || 'Zelle', numericAmount, parsedRate, calcBSS, numericAmount, description || '', txDate, registeredBy || 'ventas@corporativo.com', new Date().toISOString()]
+      // Insert advance
+      const { error: advInsertErr } = await supabase
+        .from('advances')
+        .insert({
+          id: reference,
+          client_id: clientId,
+          reference,
+          payment_type: paymentType || 'Zelle',
+          amount: numericAmount,
+          rate_bcv: parsedRate,
+          amount_bss: calcBSS,
+          remaining_amount: numericAmount,
+          description: description || '',
+          date: txDate,
+          status: 'PENDIENTE_VALIDACION',
+          registered_by: registeredBy || 'ventas@corporativo.com',
+          created_at: new Date().toISOString()
         });
+      if (advInsertErr) throw advInsertErr;
 
-        if (photoUrl) {
-          await tx.execute({
-            sql: 'INSERT INTO advance_images (advance_id, photo_base64) VALUES (?, ?)',
-            args: [reference, photoUrl]
-          });
-        }
-        await tx.commit();
-      } catch (err) {
-        await tx.rollback();
-        throw err;
-      } finally {
-        tx.close();
+      // Insert photo if provided
+      if (photoUrl) {
+        const { error: imgErr } = await supabase
+          .from('advance_images')
+          .insert({ advance_id: reference, photo_base64: photoUrl });
+        if (imgErr) console.error('Error inserting advance image:', imgErr);
       }
 
       const newAdvance: Advance = {
@@ -724,14 +613,14 @@ app.post('/api/transactions/advances/:id/verify', async (req, res) => {
     const { id } = req.params;
     const { amount, paymentType, rateBCV, amountInBSS, reference, description } = req.body;
 
-    const advRes = await db.execute({
-      sql: 'SELECT * FROM advances WHERE id = ?',
-      args: [id]
-    });
-    if (advRes.rows.length === 0) {
+    const { data: advRow, error: advErr } = await supabase
+      .from('advances')
+      .select('*')
+      .eq('id', id)
+      .single();
+    if (advErr || !advRow) {
       return res.status(404).json({ error: 'Anticipo no encontrado.' });
     }
-    const advRow = advRes.rows[0];
 
     const newAmount = amount !== undefined ? parseFloat(amount) : Number(advRow.amount);
     const newRate = rateBCV !== undefined ? parseFloat(rateBCV) : Number(advRow.rate_bcv);
@@ -740,18 +629,27 @@ app.post('/api/transactions/advances/:id/verify', async (req, res) => {
     const newDesc = description !== undefined ? description : (advRow.description as string || '');
     const newPaymentType = paymentType || (advRow.payment_type as string);
 
-    await db.execute({
-      sql: `UPDATE advances 
-              SET amount = ?, remaining_amount = ?, rate_bcv = ?, amount_bss = ?, reference = ?, description = ?, payment_type = ?, status = 'DISPONIBLE'
-              WHERE id = ?`,
-      args: [newAmount, newAmount, newRate, newBSS, newRef, newDesc, newPaymentType, id]
-    });
+    const { error: updateErr } = await supabase
+      .from('advances')
+      .update({
+        amount: newAmount,
+        remaining_amount: newAmount,
+        rate_bcv: newRate,
+        amount_bss: newBSS,
+        reference: newRef,
+        description: newDesc,
+        payment_type: newPaymentType,
+        status: 'DISPONIBLE'
+      })
+      .eq('id', id);
+    if (updateErr) throw updateErr;
 
-    const clientRes = await db.execute({
-      sql: 'SELECT name FROM clients WHERE id = ?',
-      args: [advRow.client_id]
-    });
-    const clientName = clientRes.rows[0]?.name as string || '';
+    const { data: clientRow } = await supabase
+      .from('clients')
+      .select('name')
+      .eq('id', advRow.client_id)
+      .maybeSingle();
+    const clientName = clientRow?.name as string || '';
 
     const updatedAdvance = {
       id,
@@ -780,17 +678,19 @@ app.post('/api/transactions/advances/:id/verify', async (req, res) => {
 app.post('/api/transactions/advances/:id/reject', async (req, res) => {
   try {
     const { id } = req.params;
-    const advRes = await db.execute({
-      sql: 'SELECT * FROM advances WHERE id = ?',
-      args: [id]
-    });
-    if (advRes.rows.length === 0) {
+    const { data: advRow, error: advErr } = await supabase
+      .from('advances')
+      .select('id')
+      .eq('id', id)
+      .maybeSingle();
+    if (advErr || !advRow) {
       return res.status(404).json({ error: 'Anticipo no encontrado.' });
     }
-    await db.execute({
-      sql: "UPDATE advances SET status = 'RECHAZADO' WHERE id = ?",
-      args: [id]
-    });
+    const { error: updateErr } = await supabase
+      .from('advances')
+      .update({ status: 'RECHAZADO' })
+      .eq('id', id);
+    if (updateErr) throw updateErr;
     res.json({ success: true });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
@@ -805,17 +705,13 @@ app.post('/api/reconciliation/apply-manual', async (req, res) => {
       return res.status(400).json({ error: 'Faltan campos requeridos.' });
     }
 
-    const clientRes = await db.execute({ sql: 'SELECT * FROM clients WHERE id = ?', args: [clientId] });
-    const invoiceRes = await db.execute({ sql: 'SELECT * FROM invoices WHERE id = ?', args: [invoiceId] });
-    const advanceRes = await db.execute({ sql: 'SELECT * FROM advances WHERE id = ?', args: [advanceId] });
+    const { data: client, error: cliErr } = await supabase.from('clients').select('*').eq('id', clientId).single();
+    const { data: invoice, error: invErr } = await supabase.from('invoices').select('*').eq('id', invoiceId).single();
+    const { data: advance, error: advErr } = await supabase.from('advances').select('*').eq('id', advanceId).single();
 
-    if (clientRes.rows.length === 0 || invoiceRes.rows.length === 0 || advanceRes.rows.length === 0) {
+    if (cliErr || invErr || advErr || !client || !invoice || !advance) {
       return res.status(404).json({ error: 'Cliente, factura o anticipo no encontrado.' });
     }
-
-    const client = clientRes.rows[0];
-    const invoice = invoiceRes.rows[0];
-    const advance = advanceRes.rows[0];
 
     const numAmount = parseFloat(amountApplied);
     const numRate = parseFloat(rateBCV) || Number(advance.rate_bcv);
@@ -823,41 +719,49 @@ app.post('/api/reconciliation/apply-manual', async (req, res) => {
     const appId = `APP-${Math.floor(1000 + Math.random() * 9000)}`;
     const appDate = date || new Date().toISOString().split('T')[0];
 
-    const tx = await db.transaction('write');
-    try {
-      await tx.execute({
-        sql: `INSERT INTO applications (id, invoice_id, advance_id, amount_applied, amount_applied_bss, rate_bcv, date, status, audit_notes, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, 'PENDIENTE_AUDITORIA', '', ?)`,
-        args: [appId, invoiceId, advanceId, numAmount, numBSS, numRate, appDate, new Date().toISOString()]
+    // Insert application
+    const { error: appInsertErr } = await supabase
+      .from('applications')
+      .insert({
+        id: appId,
+        invoice_id: invoiceId,
+        advance_id: advanceId,
+        amount_applied: numAmount,
+        amount_applied_bss: numBSS,
+        rate_bcv: numRate,
+        date: appDate,
+        status: 'PENDIENTE_AUDITORIA',
+        audit_notes: '',
+        created_at: new Date().toISOString()
       });
+    if (appInsertErr) throw appInsertErr;
 
-      const invRemaining = Math.max(0, Number(invoice.remaining_amount) - numAmount);
-      const invStatus = invRemaining <= 0 ? 'PAGADO' : 'PENDIENTE';
-      await tx.execute({
-        sql: 'UPDATE invoices SET remaining_amount = ?, status = ? WHERE id = ?',
-        args: [invRemaining, invStatus, invoiceId]
-      });
+    // Update invoice
+    const invRemaining = Math.max(0, Number(invoice.remaining_amount) - numAmount);
+    const invStatus = invRemaining <= 0 ? 'PAGADO' : 'PENDIENTE';
+    const { error: invUpdateErr } = await supabase
+      .from('invoices')
+      .update({ remaining_amount: invRemaining, status: invStatus })
+      .eq('id', invoiceId);
+    if (invUpdateErr) throw invUpdateErr;
 
-      const advRemaining = Math.max(0, Number(advance.remaining_amount) - numAmount);
-      const advStatus = advRemaining <= 0 ? 'APLICADO' : 'DISPONIBLE';
-      await tx.execute({
-        sql: 'UPDATE advances SET remaining_amount = ?, status = ? WHERE id = ?',
-        args: [advRemaining, advStatus, advanceId]
-      });
+    // Update advance
+    const advRemaining = Math.max(0, Number(advance.remaining_amount) - numAmount);
+    const advStatus = advRemaining <= 0 ? 'APLICADO' : 'DISPONIBLE';
+    const { error: advUpdateErr } = await supabase
+      .from('advances')
+      .update({ remaining_amount: advRemaining, status: advStatus })
+      .eq('id', advanceId);
+    if (advUpdateErr) throw advUpdateErr;
 
-      const cliPending = Math.max(0, Number(client.saldo_pendiente) - numAmount);
-      const cliStatus = cliPending === 0 ? 'Al Corriente' : 'En Revisión';
-      await tx.execute({
-        sql: 'UPDATE clients SET saldo_pendiente = ?, estado_saldo = ? WHERE id = ?',
-        args: [cliPending, cliStatus, clientId]
-      });
-      await tx.commit();
-    } catch (err) {
-      await tx.rollback();
-      throw err;
-    } finally {
-      tx.close();
-    }
+    // Update client balance
+    const cliPending = Math.max(0, Number(client.saldo_pendiente) - numAmount);
+    const cliStatus = cliPending === 0 ? 'Al Corriente' : 'En Revisión';
+    const { error: cliUpdateErr } = await supabase
+      .from('clients')
+      .update({ saldo_pendiente: cliPending, estado_saldo: cliStatus })
+      .eq('id', clientId);
+    if (cliUpdateErr) throw cliUpdateErr;
 
     const newApp: Application = {
       id: appId,
@@ -886,59 +790,64 @@ app.post('/api/transactions/applications/:id/audit', async (req, res) => {
     const { id } = req.params;
     const { status, auditNotes } = req.body;
 
-    const appRes = await db.execute({
-      sql: 'SELECT * FROM applications WHERE id = ?',
-      args: [id]
-    });
-    if (appRes.rows.length === 0) {
+    const { data: appRecord, error: appErr } = await supabase
+      .from('applications')
+      .select('*')
+      .eq('id', id)
+      .single();
+    if (appErr || !appRecord) {
       return res.status(404).json({ error: 'Aplicación no encontrada.' });
     }
-    const appRecord = appRes.rows[0];
 
-    const tx = await db.transaction('write');
-    try {
-      await tx.execute({
-        sql: 'UPDATE applications SET status = ?, audit_notes = ? WHERE id = ?',
-        args: [status, auditNotes || '', id]
-      });
+    // Update application status
+    const { error: appUpdateErr } = await supabase
+      .from('applications')
+      .update({ status, audit_notes: auditNotes || '' })
+      .eq('id', id);
+    if (appUpdateErr) throw appUpdateErr;
 
-      if (status === 'RECHAZADO') {
-        const invRes = await tx.execute({ sql: 'SELECT * FROM invoices WHERE id = ?', args: [appRecord.invoice_id] });
-        if (invRes.rows.length > 0) {
-          const invoice = invRes.rows[0];
-          const newRemaining = Number(invoice.remaining_amount) + Number(appRecord.amount_applied);
-          await tx.execute({
-            sql: "UPDATE invoices SET remaining_amount = ?, status = 'PENDIENTE' WHERE id = ?",
-            args: [newRemaining, appRecord.invoice_id]
-          });
-        }
+    if (status === 'RECHAZADO') {
+      // Revert invoice
+      const { data: invoice } = await supabase
+        .from('invoices')
+        .select('*')
+        .eq('id', appRecord.invoice_id)
+        .maybeSingle();
+      if (invoice) {
+        const newRemaining = Number(invoice.remaining_amount) + Number(appRecord.amount_applied);
+        await supabase
+          .from('invoices')
+          .update({ remaining_amount: newRemaining, status: 'PENDIENTE' })
+          .eq('id', appRecord.invoice_id);
+      }
 
-        const advRes = await tx.execute({ sql: 'SELECT * FROM advances WHERE id = ?', args: [appRecord.advance_id] });
-        if (advRes.rows.length > 0) {
-          const advance = advRes.rows[0];
-          const newRemaining = Number(advance.remaining_amount) + Number(appRecord.amount_applied);
-          await tx.execute({
-            sql: "UPDATE advances SET remaining_amount = ?, status = 'DISPONIBLE' WHERE id = ?",
-            args: [newRemaining, appRecord.advance_id]
-          });
+      // Revert advance
+      const { data: advance } = await supabase
+        .from('advances')
+        .select('*')
+        .eq('id', appRecord.advance_id)
+        .maybeSingle();
+      if (advance) {
+        const newRemaining = Number(advance.remaining_amount) + Number(appRecord.amount_applied);
+        await supabase
+          .from('advances')
+          .update({ remaining_amount: newRemaining, status: 'DISPONIBLE' })
+          .eq('id', appRecord.advance_id);
 
-          const cliRes = await tx.execute({ sql: 'SELECT * FROM clients WHERE id = ?', args: [advance.client_id] });
-          if (cliRes.rows.length > 0) {
-            const client = cliRes.rows[0];
-            const newPending = Number(client.saldo_pendiente) + Number(appRecord.amount_applied);
-            await tx.execute({
-              sql: "UPDATE clients SET saldo_pendiente = ?, estado_saldo = 'En Revisión' WHERE id = ?",
-              args: [newPending, advance.client_id]
-            });
-          }
+        // Revert client balance
+        const { data: client } = await supabase
+          .from('clients')
+          .select('*')
+          .eq('id', advance.client_id)
+          .maybeSingle();
+        if (client) {
+          const newPending = Number(client.saldo_pendiente) + Number(appRecord.amount_applied);
+          await supabase
+            .from('clients')
+            .update({ saldo_pendiente: newPending, estado_saldo: 'En Revisión' })
+            .eq('id', advance.client_id);
         }
       }
-      await tx.commit();
-    } catch (err) {
-      await tx.rollback();
-      throw err;
-    } finally {
-      tx.close();
     }
 
     res.json({ success: true });
@@ -953,68 +862,68 @@ app.post('/api/transactions/applications/:id/resubmit', async (req, res) => {
     const { id } = req.params;
     const { amountApplied, rateBCV } = req.body;
 
-    const appRes = await db.execute({
-      sql: "SELECT * FROM applications WHERE id = ? AND status = 'RECHAZADO'",
-      args: [id]
-    });
-    if (appRes.rows.length === 0) {
+    const { data: appRecord, error: appErr } = await supabase
+      .from('applications')
+      .select('*')
+      .eq('id', id)
+      .eq('status', 'RECHAZADO')
+      .single();
+    if (appErr || !appRecord) {
       return res.status(400).json({ error: 'Registro rechazado no encontrado.' });
     }
-    const appRecord = appRes.rows[0];
 
     const numAmount = parseFloat(amountApplied);
     const numRate = parseFloat(rateBCV);
     const numBSS = numAmount * numRate;
 
-    const tx = await db.transaction('write');
-    try {
-      const invRes = await tx.execute({ sql: 'SELECT * FROM invoices WHERE id = ?', args: [appRecord.invoice_id] });
-      const advRes = await tx.execute({ sql: 'SELECT * FROM advances WHERE id = ?', args: [appRecord.advance_id] });
+    const { data: invoice } = await supabase.from('invoices').select('*').eq('id', appRecord.invoice_id).single();
+    const { data: advance } = await supabase.from('advances').select('*').eq('id', appRecord.advance_id).single();
 
-      if (invRes.rows.length > 0 && advRes.rows.length > 0) {
-        const invoice = invRes.rows[0];
-        const advance = advRes.rows[0];
+    if (invoice && advance) {
+      const oldApplied = Number(appRecord.amount_applied);
+      const tempInvoiceRemaining = Number(invoice.remaining_amount) + oldApplied;
+      const tempAdvanceRemaining = Number(advance.remaining_amount) + oldApplied;
 
-        const oldApplied = Number(appRecord.amount_applied);
-        const tempInvoiceRemaining = Number(invoice.remaining_amount) + oldApplied;
-        const tempAdvanceRemaining = Number(advance.remaining_amount) + oldApplied;
+      const newInvoiceRemaining = Math.max(0, tempInvoiceRemaining - numAmount);
+      const invStatus = newInvoiceRemaining <= 0 ? 'PAGADO' : 'PENDIENTE';
+      await supabase
+        .from('invoices')
+        .update({ remaining_amount: newInvoiceRemaining, status: invStatus })
+        .eq('id', appRecord.invoice_id);
 
-        const newInvoiceRemaining = Math.max(0, tempInvoiceRemaining - numAmount);
-        const invStatus = newInvoiceRemaining <= 0 ? 'PAGADO' : 'PENDIENTE';
-        await tx.execute({
-          sql: 'UPDATE invoices SET remaining_amount = ?, status = ? WHERE id = ?',
-          args: [newInvoiceRemaining, invStatus, appRecord.invoice_id]
-        });
+      const newAdvanceRemaining = Math.max(0, tempAdvanceRemaining - numAmount);
+      const advStatus = newAdvanceRemaining <= 0 ? 'APLICADO' : 'DISPONIBLE';
+      await supabase
+        .from('advances')
+        .update({ remaining_amount: newAdvanceRemaining, status: advStatus })
+        .eq('id', appRecord.advance_id);
 
-        const newAdvanceRemaining = Math.max(0, tempAdvanceRemaining - numAmount);
-        const advStatus = newAdvanceRemaining <= 0 ? 'APLICADO' : 'DISPONIBLE';
-        await tx.execute({
-          sql: 'UPDATE advances SET remaining_amount = ?, status = ? WHERE id = ?',
-          args: [newAdvanceRemaining, advStatus, appRecord.advance_id]
-        });
-
-        const cliRes = await tx.execute({ sql: 'SELECT * FROM clients WHERE id = ?', args: [advance.client_id] });
-        if (cliRes.rows.length > 0) {
-          const client = cliRes.rows[0];
-          const tempPending = Number(client.saldo_pendiente) + oldApplied;
-          const newPending = Math.max(0, tempPending - numAmount);
-          const cliStatus = newPending === 0 ? 'Al Corriente' : 'En Revisión';
-          await tx.execute({
-            sql: 'UPDATE clients SET saldo_pendiente = ?, estado_saldo = ? WHERE id = ?',
-            args: [newPending, cliStatus, advance.client_id]
-          });
-        }
+      // Update client balance
+      const { data: client } = await supabase.from('clients').select('*').eq('id', advance.client_id).maybeSingle();
+      if (client) {
+        const tempPending = Number(client.saldo_pendiente) + oldApplied;
+        const newPending = Math.max(0, tempPending - numAmount);
+        const cliStatus = newPending === 0 ? 'Al Corriente' : 'En Revisión';
+        await supabase
+          .from('clients')
+          .update({ saldo_pendiente: newPending, estado_saldo: cliStatus })
+          .eq('id', advance.client_id);
       }
-
-      await tx.execute({
-        sql: "UPDATE applications SET amount_applied = ?, amount_applied_bss = ?, rate_bcv = ?, status = 'PENDIENTE_AUDITORIA', audit_notes = 'Reenviado con ajustes' WHERE id = ?",
-        args: [numAmount, numBSS, numRate, id]
-      });
-      await tx.commit();
-    } catch (err) {
-      await tx.rollback();
-      throw err;
     }
+
+    // Update application
+    const { error: appUpdateErr } = await supabase
+      .from('applications')
+      .update({
+        amount_applied: numAmount,
+        amount_applied_bss: numBSS,
+        rate_bcv: numRate,
+        status: 'PENDIENTE_AUDITORIA',
+        audit_notes: 'Reenviado con ajustes'
+      })
+      .eq('id', id);
+    if (appUpdateErr) throw appUpdateErr;
+
     res.json({ success: true });
   } catch (err: any) {
     res.status(550).json({ error: err.message });
@@ -1024,18 +933,24 @@ app.post('/api/transactions/applications/:id/resubmit', async (req, res) => {
 // Caja Endpoints
 app.get('/api/caja/session/current', async (req, res) => {
   try {
-    const activeRes = await db.execute({
-      sql: "SELECT * FROM caja_sessions WHERE status = 'ABIERTA' ORDER BY id DESC LIMIT 1"
-    });
-    if (activeRes.rows.length > 0) {
-      const row = activeRes.rows[0];
+    const { data: activeSession, error } = await supabase
+      .from('caja_sessions')
+      .select('*')
+      .eq('status', 'ABIERTA')
+      .order('id', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (error) throw error;
+
+    if (activeSession) {
       const session = {
-        id: Number(row.id),
-        openedBy: row.opened_by as string,
-        openedAt: row.opened_at as string,
-        closedAt: row.closed_at as string || null,
-        initialBalance: Number(row.initial_balance),
-        status: row.status as string
+        id: Number(activeSession.id),
+        openedBy: activeSession.opened_by as string,
+        openedAt: activeSession.opened_at as string,
+        closedAt: activeSession.closed_at as string || null,
+        initialBalance: Number(activeSession.initial_balance),
+        status: activeSession.status as string
       };
       res.json({ active: true, session });
     } else {
@@ -1048,8 +963,9 @@ app.get('/api/caja/session/current', async (req, res) => {
 
 app.get('/api/caja/sessions', async (req, res) => {
   try {
-    const sessionsRes = await db.execute('SELECT * FROM caja_sessions');
-    const sessions = sessionsRes.rows.map(r => ({
+    const { data: sessionsData, error: sessErr } = await supabase.from('caja_sessions').select('*');
+    if (sessErr) throw sessErr;
+    const sessions = (sessionsData || []).map(r => ({
       id: Number(r.id),
       openedBy: r.opened_by as string,
       openedAt: r.opened_at as string,
@@ -1058,8 +974,9 @@ app.get('/api/caja/sessions', async (req, res) => {
       status: r.status as string
     }));
 
-    const txsRes = await db.execute('SELECT * FROM caja_transactions');
-    const transactions = txsRes.rows.map(r => ({
+    const { data: txsData, error: txsErr } = await supabase.from('caja_transactions').select('*');
+    if (txsErr) throw txsErr;
+    const transactions = (txsData || []).map(r => ({
       id: Number(r.id),
       sessionId: Number(r.session_id),
       type: r.type as string,
@@ -1071,8 +988,9 @@ app.get('/api/caja/sessions', async (req, res) => {
       createdAt: r.created_at as string
     }));
 
-    const closuresRes = await db.execute('SELECT * FROM caja_closures');
-    const closures = closuresRes.rows.map(r => ({
+    const { data: closuresData, error: closErr } = await supabase.from('caja_closures').select('*');
+    if (closErr) throw closErr;
+    const closures = (closuresData || []).map(r => ({
       id: Number(r.id),
       sessionId: Number(r.session_id),
       calculatedBalanceBSS: Number(r.calculated_balance_bss),
@@ -1091,10 +1009,13 @@ app.get('/api/caja/sessions', async (req, res) => {
 app.post('/api/caja/session/open', async (req, res) => {
   try {
     const { openedBy, initialBalance } = req.body;
-    const activeRes = await db.execute({
-      sql: "SELECT id FROM caja_sessions WHERE status = 'ABIERTA'"
-    });
-    if (activeRes.rows.length > 0) {
+
+    const { data: activeCheck } = await supabase
+      .from('caja_sessions')
+      .select('id')
+      .eq('status', 'ABIERTA')
+      .maybeSingle();
+    if (activeCheck) {
       return res.status(400).json({ error: 'Ya hay una sesión de caja activa.' });
     }
 
@@ -1102,15 +1023,20 @@ app.post('/api/caja/session/open', async (req, res) => {
     const initBal = parseFloat(initialBalance) || 0;
     const user = openedBy || 'tesoreria@corporativo.com';
 
-    const insertRes = await db.execute({
-      sql: "INSERT INTO caja_sessions (opened_by, opened_at, initial_balance, status) VALUES (?, ?, ?, 'ABIERTA')",
-      args: [user, openedAt, initBal]
-    });
-
-    const newId = Number(insertRes.lastInsertRowid);
+    const { data: inserted, error: insertErr } = await supabase
+      .from('caja_sessions')
+      .insert({
+        opened_by: user,
+        opened_at: openedAt,
+        initial_balance: initBal,
+        status: 'ABIERTA'
+      })
+      .select('id')
+      .single();
+    if (insertErr) throw insertErr;
 
     res.status(201).json({
-      id: newId,
+      id: Number(inserted.id),
       openedBy: user,
       openedAt,
       initialBalance: initBal,
@@ -1124,11 +1050,14 @@ app.post('/api/caja/session/open', async (req, res) => {
 app.post('/api/caja/transaction', async (req, res) => {
   try {
     const { sessionId, type, paymentMethod, currency, amount, rateBCV, description } = req.body;
-    const sessionRes = await db.execute({
-      sql: "SELECT * FROM caja_sessions WHERE id = ? AND status = 'ABIERTA'",
-      args: [parseInt(sessionId)]
-    });
-    if (sessionRes.rows.length === 0) {
+
+    const { data: sessionRow, error: sessErr } = await supabase
+      .from('caja_sessions')
+      .select('*')
+      .eq('id', parseInt(sessionId))
+      .eq('status', 'ABIERTA')
+      .maybeSingle();
+    if (sessErr || !sessionRow) {
       return res.status(400).json({ error: 'No hay sesión de caja abierta.' });
     }
 
@@ -1136,15 +1065,24 @@ app.post('/api/caja/transaction', async (req, res) => {
     const rateVal = parseFloat(rateBCV) || 36.50;
     const created = new Date().toISOString();
 
-    const insertRes = await db.execute({
-      sql: 'INSERT INTO caja_transactions (session_id, type, payment_method, currency, amount, rate_bcv, description, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-      args: [parseInt(sessionId), type || 'Ingreso', paymentMethod || 'Efectivo', currency || 'USD', amountVal, rateVal, description || '', created]
-    });
-
-    const newId = Number(insertRes.lastInsertRowid);
+    const { data: inserted, error: insertErr } = await supabase
+      .from('caja_transactions')
+      .insert({
+        session_id: parseInt(sessionId),
+        type: type || 'Ingreso',
+        payment_method: paymentMethod || 'Efectivo',
+        currency: currency || 'USD',
+        amount: amountVal,
+        rate_bcv: rateVal,
+        description: description || '',
+        created_at: created
+      })
+      .select('id')
+      .single();
+    if (insertErr) throw insertErr;
 
     res.status(201).json({
-      id: newId,
+      id: Number(inserted.id),
       sessionId: parseInt(sessionId),
       type: type || 'Ingreso',
       paymentMethod: paymentMethod || 'Efectivo',
@@ -1163,23 +1101,25 @@ app.post('/api/caja/session/close', async (req, res) => {
   try {
     const { sessionId, realBalanceBSS, notes } = req.body;
 
-    const sessionRes = await db.execute({
-      sql: "SELECT * FROM caja_sessions WHERE id = ? AND status = 'ABIERTA'",
-      args: [parseInt(sessionId)]
-    });
-
-    if (sessionRes.rows.length === 0) {
+    const { data: session, error: sessErr } = await supabase
+      .from('caja_sessions')
+      .select('*')
+      .eq('id', parseInt(sessionId))
+      .eq('status', 'ABIERTA')
+      .single();
+    if (sessErr || !session) {
       return res.status(400).json({ error: 'No hay sesión activa.' });
     }
 
-    const session = sessionRes.rows[0];
-    const txsRes = await db.execute({
-      sql: 'SELECT * FROM caja_transactions WHERE session_id = ?',
-      args: [session.id]
-    });
+    // Get transactions for this session
+    const { data: txs, error: txsErr } = await supabase
+      .from('caja_transactions')
+      .select('*')
+      .eq('session_id', session.id);
+    if (txsErr) throw txsErr;
 
     let totalBSS = Number(session.initial_balance);
-    txsRes.rows.forEach(t => {
+    (txs || []).forEach(t => {
       const valBSS = Number(t.amount) * Number(t.rate_bcv);
       if (t.type === 'Ingreso') {
         totalBSS += valBSS;
@@ -1192,23 +1132,25 @@ app.post('/api/caja/session/close', async (req, res) => {
     const discrepancy = parsedReal - totalBSS;
     const closedAt = new Date().toISOString();
 
-    const tx = await db.transaction('write');
-    try {
-      await tx.execute({
-        sql: "UPDATE caja_sessions SET status = 'CERRADA', closed_at = ? WHERE id = ?",
-        args: [closedAt, session.id]
+    // Update session status
+    const { error: sessUpdateErr } = await supabase
+      .from('caja_sessions')
+      .update({ status: 'CERRADA', closed_at: closedAt })
+      .eq('id', session.id);
+    if (sessUpdateErr) throw sessUpdateErr;
+
+    // Insert closure record
+    const { error: closureErr } = await supabase
+      .from('caja_closures')
+      .insert({
+        session_id: session.id,
+        calculated_balance_bss: totalBSS,
+        real_balance_bss: parsedReal,
+        discrepancy_bss: discrepancy,
+        closure_date: closedAt,
+        notes: notes || ''
       });
-      await tx.execute({
-        sql: 'INSERT INTO caja_closures (session_id, calculated_balance_bss, real_balance_bss, discrepancy_bss, closure_date, notes) VALUES (?, ?, ?, ?, ?, ?)',
-        args: [session.id, totalBSS, parsedReal, discrepancy, closedAt, notes || '']
-      });
-      await tx.commit();
-    } catch (err) {
-      await tx.rollback();
-      throw err;
-    } finally {
-      tx.close();
-    }
+    if (closureErr) throw closureErr;
 
     res.json({
       success: true,
@@ -1242,101 +1184,115 @@ app.post('/api/reconciliation/execute', async (req, res) => {
       return res.status(400).json({ error: 'El ID de cliente es obligatorio.' });
     }
 
-    const cliRes = await db.execute({ sql: 'SELECT * FROM clients WHERE id = ?', args: [clientId] });
-    if (cliRes.rows.length === 0) {
+    const { data: client, error: cliErr } = await supabase
+      .from('clients')
+      .select('*')
+      .eq('id', clientId)
+      .single();
+    if (cliErr || !client) {
       return res.status(404).json({ error: 'Cliente no encontrado.' });
     }
-    const client = cliRes.rows[0];
 
-    const invoicesRes = await db.execute({
-      sql: "SELECT * FROM invoices WHERE client_id = ? AND status = 'PENDIENTE' AND remaining_amount > 0 ORDER BY date ASC",
-      args: [clientId]
-    });
-    const clientInvoices = invoicesRes.rows;
+    // Get pending invoices sorted by date ASC (FIFO)
+    const { data: clientInvoices, error: invErr } = await supabase
+      .from('invoices')
+      .select('*')
+      .eq('client_id', clientId)
+      .eq('status', 'PENDIENTE')
+      .gt('remaining_amount', 0)
+      .order('date', { ascending: true });
+    if (invErr) throw invErr;
 
-    const advancesRes = await db.execute({
-      sql: "SELECT * FROM advances WHERE client_id = ? AND status = 'DISPONIBLE' AND remaining_amount > 0 ORDER BY date ASC",
-      args: [clientId]
-    });
-    const clientAdvances = advancesRes.rows;
+    // Get available advances sorted by date ASC (FIFO)
+    const { data: clientAdvances, error: advErr } = await supabase
+      .from('advances')
+      .select('*')
+      .eq('client_id', clientId)
+      .eq('status', 'DISPONIBLE')
+      .gt('remaining_amount', 0)
+      .order('date', { ascending: true });
+    if (advErr) throw advErr;
 
     let totalAmountApplied = 0;
     const generatedApplications: any[] = [];
 
-    const tx = await db.transaction('write');
-    try {
-      for (const invoice of clientInvoices) {
-        let invRemaining = Number(invoice.remaining_amount);
-        if (invRemaining <= 0) continue;
+    // Clone remaining amounts to track in-memory
+    const invoiceRemainings = (clientInvoices || []).map(inv => ({ ...inv, _remaining: Number(inv.remaining_amount) }));
+    const advanceRemainings = (clientAdvances || []).map(adv => ({ ...adv, _remaining: Number(adv.remaining_amount) }));
 
-        for (const advance of clientAdvances) {
-          let advRemaining = Number(advance.remaining_amount);
-          if (advRemaining <= 0) continue;
-          if (invRemaining <= 0) break;
+    for (const invoice of invoiceRemainings) {
+      if (invoice._remaining <= 0) continue;
 
-          const maxApplied = Math.min(invRemaining, advRemaining);
+      for (const advance of advanceRemainings) {
+        if (advance._remaining <= 0) continue;
+        if (invoice._remaining <= 0) break;
 
-          invRemaining -= maxApplied;
-          advRemaining -= maxApplied;
-          totalAmountApplied += maxApplied;
+        const maxApplied = Math.min(invoice._remaining, advance._remaining);
 
-          const invStatus = invRemaining <= 0 ? 'PAGADO' : 'PENDIENTE';
-          const advStatus = advRemaining <= 0 ? 'APLICADO' : 'DISPONIBLE';
+        invoice._remaining -= maxApplied;
+        advance._remaining -= maxApplied;
+        totalAmountApplied += maxApplied;
 
-          await tx.execute({
-            sql: 'UPDATE invoices SET remaining_amount = ?, status = ? WHERE id = ?',
-            args: [invRemaining, invStatus, invoice.id]
-          });
-          await tx.execute({
-            sql: 'UPDATE advances SET remaining_amount = ?, status = ? WHERE id = ?',
-            args: [advRemaining, advStatus, advance.id]
-          });
+        const invStatus = invoice._remaining <= 0 ? 'PAGADO' : 'PENDIENTE';
+        const advStatus = advance._remaining <= 0 ? 'APLICADO' : 'DISPONIBLE';
 
-          const appId = `APP-${Math.floor(1000 + Math.random() * 9000)}`;
-          const appDate = new Date().toISOString().split('T')[0];
-          const rate = Number(advance.rate_bcv);
+        // Update invoice
+        await supabase
+          .from('invoices')
+          .update({ remaining_amount: invoice._remaining, status: invStatus })
+          .eq('id', invoice.id);
 
-          await tx.execute({
-            sql: `INSERT INTO applications (id, invoice_id, advance_id, amount_applied, amount_applied_bss, rate_bcv, date, status, audit_notes, created_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, 'APROBADO', '', ?)`,
-            args: [appId, invoice.id, advance.id, maxApplied, maxApplied * rate, rate, appDate, new Date().toISOString()]
-          });
+        // Update advance
+        await supabase
+          .from('advances')
+          .update({ remaining_amount: advance._remaining, status: advStatus })
+          .eq('id', advance.id);
 
-          generatedApplications.push({
+        // Create application
+        const appId = `APP-${Math.floor(1000 + Math.random() * 9000)}`;
+        const appDate = new Date().toISOString().split('T')[0];
+        const rate = Number(advance.rate_bcv);
+
+        await supabase
+          .from('applications')
+          .insert({
             id: appId,
-            invoiceId: invoice.id,
-            invoiceReference: invoice.id,
-            advanceId: advance.id,
-            advanceReference: advance.reference,
-            clientName: client.name,
-            amountApplied: maxApplied,
-            amountAppliedBSS: maxApplied * rate,
-            rateBCV: rate,
+            invoice_id: invoice.id,
+            advance_id: advance.id,
+            amount_applied: maxApplied,
+            amount_applied_bss: maxApplied * rate,
+            rate_bcv: rate,
             date: appDate,
             status: 'APROBADO',
-            auditNotes: ''
+            audit_notes: '',
+            created_at: new Date().toISOString()
           });
 
-          advance.remaining_amount = advRemaining;
-        }
-        invoice.remaining_amount = invRemaining;
+        generatedApplications.push({
+          id: appId,
+          invoiceId: invoice.id,
+          invoiceReference: invoice.id,
+          advanceId: advance.id,
+          advanceReference: advance.reference,
+          clientName: client.name,
+          amountApplied: maxApplied,
+          amountAppliedBSS: maxApplied * rate,
+          rateBCV: rate,
+          date: appDate,
+          status: 'APROBADO',
+          auditNotes: ''
+        });
       }
-
-      const currentPending = Number(client.saldo_pendiente);
-      const newPending = Math.max(0, currentPending - totalAmountApplied);
-      const cliStatus = newPending === 0 ? 'Al Corriente' : 'En Revisión';
-
-      await tx.execute({
-        sql: 'UPDATE clients SET saldo_pendiente = ?, estado_saldo = ? WHERE id = ?',
-        args: [newPending, cliStatus, clientId]
-      });
-      await tx.commit();
-    } catch (err) {
-      await tx.rollback();
-      throw err;
-    } finally {
-      tx.close();
     }
+
+    // Update client balance
+    const currentPending = Number(client.saldo_pendiente);
+    const newPending = Math.max(0, currentPending - totalAmountApplied);
+    const cliStatus = newPending === 0 ? 'Al Corriente' : 'En Revisión';
+    await supabase
+      .from('clients')
+      .update({ saldo_pendiente: newPending, estado_saldo: cliStatus })
+      .eq('id', clientId);
 
     res.json({
       success: true,

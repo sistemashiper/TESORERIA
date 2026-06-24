@@ -7,8 +7,9 @@
 import { supabase } from './supabaseClient';
 import { initialClients, initialInvoices, initialAdvances, initialApplications } from './initialData';
 
-async function insertTable<T>(table: string, rows: T[]) {
-    const { data, error } = await supabase.from<T>(table).upsert(rows, { returning: 'minimal' });
+// Generic helper to insert rows into a Supabase table. Using `any` to avoid type‑argument issues with the Supabase client typings.
+async function insertTable(table: string, rows: any[]) {
+    const { data, error } = await supabase.from(table).upsert(rows, { returning: 'minimal' });
     if (error) {
         console.error(`Error inserting into ${table}:`, error);
         process.exit(1);
